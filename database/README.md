@@ -1,6 +1,6 @@
 # 🗄️ Supabase 데이터베이스 설정 가이드
 
-UVKL 프로젝트의 Supabase 데이터베이스 설정 방법입니다.
+SupremeNote 프로젝트의 Supabase 데이터베이스 설정 방법입니다.
 
 ## 📋 목차
 1. [Supabase 프로젝트 생성](#1-supabase-프로젝트-생성)

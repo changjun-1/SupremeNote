@@ -1,5 +1,18 @@
-# 🏗️ Project: UVKL (Universal Video Knowledge Library) v6.0
-> **Overview:** ThetaWave의 UI와 사용자 맞춤형 '최고 명령(Supreme Instruction)' 기능이 결합된 AI 지식 관리 플랫폼.
+# 🏗️ Project: SupremeNote
+> **Overview:** ThetaWave의 세련된 UI와 사용자 맞춤형 'Supreme Instruction' 기능이 결합된 AI 지식 관리 플랫폼.
+
+## 🌐 로컬 개발 주소
+
+| 서비스 | URL | 설명 |
+|:---|:---|:---|
+| **Frontend** | http://localhost:3000 | Next.js 웹 애플리케이션 |
+| **Login** | http://localhost:3000/auth/signin | 로그인 페이지 |
+| **Dashboard** | http://localhost:3000/dashboard | 메인 대시보드 (로그인 필요) |
+| **Backend API** | http://localhost:8000 | FastAPI 서버 |
+| **API Docs** | http://localhost:8000/docs | Swagger API 문서 |
+| **API Redoc** | http://localhost:8000/redoc | ReDoc API 문서 |
+
+---
 
 ## 1. 🎯 프로젝트 목표
 - **입력:** 유튜브 URL, PDF, PPT, 일반 텍스트.

@@ -1,4 +1,4 @@
-# UVKL Backend
+# SupremeNote Backend
 
 FastAPI 기반의 백엔드 서버입니다.
 

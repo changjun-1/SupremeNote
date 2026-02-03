@@ -1,5 +1,5 @@
 """
-UVKL Backend - FastAPI Main Application
+SupremeNote Backend - FastAPI Main Application
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,8 +11,8 @@ load_dotenv()
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="UVKL API",
-    description="Universal Video Knowledge Library Backend",
+    title="SupremeNote API",
+    description="AI-Powered Knowledge Management Platform",
     version="1.0.0"
 )
 
@@ -29,7 +29,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
-        "message": "🎯 UVKL API is running!",
+        "message": "🎯 SupremeNote API is running!",
         "version": "1.0.0",
         "status": "healthy"
     }
@@ -38,8 +38,12 @@ async def root():
 async def health_check():
     return {"status": "ok"}
 
-# TODO: 라우터들을 여기에 추가할 예정
-# from app.routers import youtube, documents, ai
+# 인증 라우터 추가
+from routers import auth
+app.include_router(auth.router)
+
+# TODO: 추가 라우터들
+# from routers import youtube, documents, ai
 # app.include_router(youtube.router, prefix="/api/youtube", tags=["YouTube"])
 # app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 # app.include_router(ai.router, prefix="/api/ai", tags=["AI Processing"])

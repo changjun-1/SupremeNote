@@ -1,5 +1,5 @@
 -- ================================================
--- UVKL Database Schema for Supabase
+-- SupremeNote Database Schema for Supabase
 -- ================================================
 
 -- Enable UUID extension

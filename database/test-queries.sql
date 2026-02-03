@@ -1,5 +1,5 @@
 -- ================================================
--- UVKL Database Test Queries
+-- SupremeNote Database Test Queries
 -- ================================================
 -- Supabase SQL Editor에서 실행하여 데이터베이스를 테스트할 수 있습니다
 
