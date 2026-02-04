@@ -56,3 +56,7 @@ dist/
 tmp/
 temp/
 *.tmp
+
+# Backend
+backend/downloads/
+backend/test_gemini.py

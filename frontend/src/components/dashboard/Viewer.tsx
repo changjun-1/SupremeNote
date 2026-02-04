@@ -2,18 +2,122 @@
 
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Download, Edit, Save, BookOpen, Network, Share2, Star, MoreVertical, Sparkles, LogOut, User, Settings } from 'lucide-react'
-import { useSession, signOut } from 'next-auth/react'
+import { Download, Edit, Save, BookOpen, Network, Share2, Star, MoreVertical, Sparkles, LogOut, User, Settings, Youtube, ExternalLink, Play } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import { useRouter } from 'next/navigation'
+
+import type { Note } from '@/types/database'
+import { toggleFavorite } from '@/lib/notes'
 
 interface ViewerProps {
-  note: any
+  session: any
+  note: Note | null
+  onEdit: () => void
+  onSaveAsNote?: (note: Note) => void
 }
 
-export default function Viewer({ note }: ViewerProps) {
-  const { data: session } = useSession()
-  const [activeTab, setActiveTab] = useState<'markdown' | 'mindmap'>('markdown')
-  const [isFavorite, setIsFavorite] = useState(false)
+export default function Viewer({ session, note, onEdit, onSaveAsNote }: ViewerProps) {
+  const router = useRouter()
+  const [activeTab, setActiveTab] = useState<'markdown' | 'mindmap' | 'video'>('markdown')
+  const [isFavorite, setIsFavorite] = useState(note?.is_favorite || false)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  
+  useEffect(() => {
+    setIsFavorite(note?.is_favorite || false)
+  }, [note])
+  
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.push('/auth/signin')
+  }
+
+  const handleToggleFavorite = async () => {
+    if (!note) return
+    
+    const newFavoriteState = !isFavorite
+    setIsFavorite(newFavoriteState)
+    
+    try {
+      await toggleFavorite(note.id, newFavoriteState)
+    } catch (error) {
+      // Revert on error
+      setIsFavorite(!newFavoriteState)
+      alert('즐겨찾기 설정 실패')
+    }
+  }
+
+  const handleSaveAsNote = async () => {
+    if (!note || !onSaveAsNote) return
+    
+    setIsSaving(true)
+    try {
+      await onSaveAsNote(note)
+      alert('✅ 노트로 저장되었습니다!')
+    } catch (error) {
+      console.error('노트 저장 실패:', error)
+      alert('❌ 노트 저장에 실패했습니다.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // YouTube URL 추출
+  const extractYoutubeUrl = (content: string): string | null => {
+    const match = content.match(/\*\*영상 URL:\*\* (https:\/\/[^\s]+)/);
+    return match ? match[1] : null;
+  }
+
+  // YouTube 비디오 ID 추출
+  const getYoutubeVideoId = (url: string): string | null => {
+    const match = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/);
+    return match ? match[1] : null;
+  }
+
+  const isYoutubeSummary = note?.tags?.includes('youtube') || note?.content?.includes('📺 YouTube 요약');
+  const youtubeUrl = note ? extractYoutubeUrl(note.content) : null;
+  const videoId = youtubeUrl ? getYoutubeVideoId(youtubeUrl) : null;
+
+  // YouTube 요약에서 핵심 포인트 추출
+  const extractKeyPoints = (content: string): string[] => {
+    const keyPointsSection = content.match(/## 💡 핵심 포인트\s+([\s\S]*?)(?=\n##|\n---|\*생성 일시|$)/);
+    if (!keyPointsSection) return [];
+    
+    const points = keyPointsSection[1]
+      .split(/\n/)
+      .filter(line => /^\d+\./.test(line.trim()))
+      .map(line => line.replace(/^\d+\.\s*/, '').trim())
+      .filter(p => p.length > 0);
+    
+    return points.slice(0, 8); // 최대 8개
+  }
+
+  // YouTube 요약용 마인드맵 생성
+  const generateYoutubeMindmap = (): string => {
+    if (!note || !isYoutubeSummary) return mockMermaidCode;
+    
+    const keyPoints = extractKeyPoints(note.content);
+    if (keyPoints.length === 0) return mockMermaidCode;
+    
+    // 제목을 30자로 제한
+    const shortTitle = note.title.length > 30 
+      ? note.title.substring(0, 27) + '...' 
+      : note.title;
+    
+    let mermaid = `mindmap
+  root((${shortTitle}))
+`;
+    
+    keyPoints.forEach((point, index) => {
+      // 각 포인트를 35자로 제한
+      const shortPoint = point.length > 35 
+        ? point.substring(0, 32) + '...' 
+        : point;
+      mermaid += `    포인트${index + 1}\n      ${shortPoint}\n`;
+    });
+    
+    return mermaid;
+  }
 
   // Mock data
   const mockMarkdown = `# 머신러닝 기초 강의 요약
@@ -106,7 +210,7 @@ export default function Viewer({ note }: ViewerProps) {
     }
   }, [activeTab])
 
-  if (!note && !mockMarkdown) {
+  if (!note) {
     return (
       <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <div className="text-center max-w-md">
@@ -155,6 +259,19 @@ export default function Viewer({ note }: ViewerProps) {
               <BookOpen className="w-4 h-4 inline mr-2" />
               노트
             </button>
+            {isYoutubeSummary && videoId && (
+              <button
+                onClick={() => setActiveTab('video')}
+                className={`px-4 py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+                  activeTab === 'video'
+                    ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-lg shadow-red-500/30'
+                    : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50 hover:text-slate-300'
+                }`}
+              >
+                <Youtube className="w-4 h-4 inline mr-2" />
+                영상 보기
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('mindmap')}
               className={`px-4 py-2.5 rounded-xl font-semibold transition-all duration-200 ${
@@ -170,8 +287,18 @@ export default function Viewer({ note }: ViewerProps) {
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
+            {isYoutubeSummary && onSaveAsNote && (
+              <button 
+                onClick={handleSaveAsNote}
+                disabled={isSaving}
+                className="px-4 py-2.5 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white rounded-xl font-semibold transition-all shadow-lg shadow-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                {isSaving ? '저장 중...' : '노트로 저장'}
+              </button>
+            )}
             <button 
-              onClick={() => setIsFavorite(!isFavorite)}
+              onClick={handleToggleFavorite}
               className={`p-2.5 rounded-xl transition-all ${
                 isFavorite
                   ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
@@ -183,15 +310,14 @@ export default function Viewer({ note }: ViewerProps) {
             <button className="p-2.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 rounded-xl transition-all">
               <Share2 className="w-5 h-5" />
             </button>
-            <button className="p-2.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 rounded-xl transition-all">
+            <button 
+              onClick={onEdit}
+              className="p-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-xl transition-all"
+            >
               <Edit className="w-5 h-5" />
             </button>
             <button className="p-2.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 rounded-xl transition-all">
               <Download className="w-5 h-5" />
-            </button>
-            <button className="px-5 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl font-semibold flex items-center gap-2 transition-all shadow-lg shadow-green-500/25">
-              <Save className="w-4 h-4" />
-              저장
             </button>
 
             {/* User Menu */}
@@ -202,10 +328,10 @@ export default function Viewer({ note }: ViewerProps) {
                   className="flex items-center gap-2 px-3 py-2 bg-slate-700/30 hover:bg-slate-700/50 rounded-xl transition-all"
                 >
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
-                    {session.user.name?.[0] || session.user.email?.[0] || 'U'}
+                    {session.user.user_metadata?.name?.[0] || session.user.email?.[0] || 'U'}
                   </div>
                   <span className="text-sm text-white hidden md:block">
-                    {session.user.name || '사용자'}
+                    {session.user.user_metadata?.name || session.user.user_metadata?.full_name || '사용자'}
                   </span>
                 </button>
 
@@ -221,11 +347,11 @@ export default function Viewer({ note }: ViewerProps) {
                       <div className="p-4 border-b border-slate-700/50">
                         <div className="flex items-center gap-3">
                           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
-                            {session.user.name?.[0] || session.user.email?.[0] || 'U'}
+                            {session.user.user_metadata?.name?.[0] || session.user.email?.[0] || 'U'}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-semibold text-white truncate">
-                              {session.user.name || '사용자'}
+                              {session.user.user_metadata?.name || session.user.user_metadata?.full_name || '사용자'}
                             </p>
                             <p className="text-xs text-slate-400 truncate">
                               {session.user.email}
@@ -249,7 +375,7 @@ export default function Viewer({ note }: ViewerProps) {
                       {/* Logout */}
                       <div className="p-2 border-t border-slate-700/50">
                         <button
-                          onClick={() => signOut({ callbackUrl: '/auth/signin' })}
+                          onClick={handleSignOut}
                           className="w-full px-4 py-2.5 flex items-center gap-3 text-red-400 hover:bg-red-500/10 rounded-lg transition-all text-sm font-medium"
                         >
                           <LogOut className="w-4 h-4" />
@@ -267,41 +393,100 @@ export default function Viewer({ note }: ViewerProps) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'markdown' ? (
+        {activeTab === 'video' && videoId ? (
+          <div className="max-w-6xl mx-auto px-8 py-12">
+            <div className="mb-6 text-center">
+              <h2 className="text-2xl font-bold text-white mb-2">YouTube 비디오</h2>
+              <p className="text-slate-400">사이트 내에서 바로 시청하세요</p>
+            </div>
+            
+            {/* YouTube Player */}
+            <div className="glass-morphism rounded-2xl overflow-hidden shadow-2xl">
+              <div className="relative" style={{ paddingBottom: '56.25%' }}>
+                <iframe
+                  src={`https://www.youtube.com/embed/${videoId}`}
+                  title="YouTube video player"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                  className="absolute top-0 left-0 w-full h-full"
+                  style={{ border: 'none' }}
+                />
+              </div>
+            </div>
+
+            {/* Quick Links */}
+            <div className="mt-6 flex gap-3 justify-center">
+              <a
+                href={youtubeUrl!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium flex items-center gap-2 transition-all shadow-lg shadow-red-500/25"
+              >
+                <Youtube className="w-5 h-5" />
+                YouTube에서 열기
+                <ExternalLink className="w-4 h-4" />
+              </a>
+              <button
+                onClick={() => setActiveTab('markdown')}
+                className="px-6 py-3 bg-slate-700/50 hover:bg-slate-700 text-slate-300 rounded-xl font-medium flex items-center gap-2 transition-all"
+              >
+                <BookOpen className="w-5 h-5" />
+                요약 노트 보기
+              </button>
+            </div>
+          </div>
+        ) : activeTab === 'markdown' ? (
           <div className="max-w-4xl mx-auto px-8 py-12">
             {/* Note Header */}
             <div className="mb-8 pb-6 border-b border-slate-700/50">
               <div className="flex items-start gap-4 mb-4">
                 <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-2xl shadow-lg">
-                  🤖
+                  {isYoutubeSummary ? '📺' : '📝'}
                 </div>
                 <div className="flex-1">
                   <h1 className="text-3xl font-bold text-white mb-2">
-                    머신러닝 기초 강의
+                    {note.title || '제목 없음'}
                   </h1>
                   <div className="flex items-center gap-4 text-sm text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                      AI 생성 완료
-                    </span>
+                    <span>생성: {new Date(note.created_at).toLocaleString('ko-KR')}</span>
                     <span>•</span>
-                    <span>2시간 전</span>
-                    <span>•</span>
-                    <span>약 5분 읽기</span>
+                    <span>수정: {new Date(note.updated_at).toLocaleString('ko-KR')}</span>
+                    {youtubeUrl && (
+                      <>
+                        <span>•</span>
+                        <a
+                          href={youtubeUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-red-400 hover:text-red-300 transition-colors font-medium"
+                        >
+                          <Youtube className="w-4 h-4" />
+                          YouTube에서 보기
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
               
-              {/* Supreme Instruction Badge */}
-              <div className="glass-morphism rounded-xl p-4 border-l-4 border-blue-500">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="w-4 h-4 text-blue-400" />
-                  <span className="text-sm font-semibold text-blue-300">Supreme Instruction</span>
+              {/* Tags */}
+              {note.tags && note.tags.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {note.tags.map((tag) => (
+                    <span
+                      key={tag}
+                      className={`px-3 py-1.5 rounded-lg text-sm border ${
+                        tag === 'youtube'
+                          ? 'bg-red-500/20 text-red-300 border-red-500/30'
+                          : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                      }`}
+                    >
+                      #{tag}
+                    </span>
+                  ))}
                 </div>
-                <p className="text-slate-300 text-sm">
-                  핵심 개념 5가지로 요약해주세요
-                </p>
-              </div>
+              )}
             </div>
 
             {/* Markdown Content */}
@@ -365,19 +550,25 @@ export default function Viewer({ note }: ViewerProps) {
                   ),
                 }}
               >
-                {mockMarkdown}
+                {note.content || '*내용이 없습니다.*'}
               </ReactMarkdown>
             </article>
           </div>
         ) : (
           <div className="max-w-6xl mx-auto px-8 py-12">
             <div className="mb-6 text-center">
-              <h2 className="text-2xl font-bold text-white mb-2">지식 구조 마인드맵</h2>
-              <p className="text-slate-400">AI가 생성한 개념 간의 관계를 시각화합니다</p>
+              <h2 className="text-2xl font-bold text-white mb-2">
+                {isYoutubeSummary ? '📺 YouTube 요약 마인드맵' : '지식 구조 마인드맵'}
+              </h2>
+              <p className="text-slate-400">
+                {isYoutubeSummary 
+                  ? '핵심 포인트를 한눈에 확인하세요' 
+                  : 'AI가 생성한 개념 간의 관계를 시각화합니다'}
+              </p>
             </div>
             <div className="glass-morphism rounded-2xl p-8 shadow-2xl">
               <div className="mermaid bg-slate-900/50 rounded-xl p-8">
-                {mockMermaidCode}
+                {isYoutubeSummary ? generateYoutubeMindmap() : mockMermaidCode}
               </div>
             </div>
           </div>

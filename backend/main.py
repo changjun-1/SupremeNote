@@ -9,6 +9,12 @@ import os
 # Load environment variables
 load_dotenv()
 
+# FFmpeg 경로를 PATH에 추가 (Whisper가 FFmpeg를 찾을 수 있도록)
+ffmpeg_path = r'C:\Users\1213j\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin'
+if ffmpeg_path not in os.environ['PATH']:
+    os.environ['PATH'] = ffmpeg_path + os.pathsep + os.environ['PATH']
+    print(f"[INFO] FFmpeg 경로 추가됨: {ffmpeg_path}")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="SupremeNote API",
@@ -38,13 +44,13 @@ async def root():
 async def health_check():
     return {"status": "ok"}
 
-# 인증 라우터 추가
-from routers import auth
-app.include_router(auth.router)
+# 라우터 추가
+from routers import youtube
+app.include_router(youtube.router, prefix="/api/youtube", tags=["YouTube"])
 
 # TODO: 추가 라우터들
-# from routers import youtube, documents, ai
-# app.include_router(youtube.router, prefix="/api/youtube", tags=["YouTube"])
+# from routers import documents, ai
+# app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 # app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 # app.include_router(ai.router, prefix="/api/ai", tags=["AI Processing"])
 

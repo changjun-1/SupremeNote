@@ -1,10 +1,14 @@
 import { redirect } from 'next/navigation'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '@/app/api/auth/[...nextauth]/route'
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 import Dashboard from '@/components/dashboard/Dashboard'
 
 export default async function DashboardPage() {
-  const session = await getServerSession(authOptions)
+  const supabase = createServerComponentClient({ cookies })
+  
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
 
   if (!session) {
     redirect('/auth/signin')

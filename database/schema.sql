@@ -1,230 +1,206 @@
--- ================================================
--- SupremeNote Database Schema for Supabase
--- ================================================
+-- SupremeNote Database Schema
+-- AI 기반 스마트 학습 플랫폼
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Enable pgvector extension for future RAG implementation
+-- 1. pgvector extension 활성화 (Vector 검색용)
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- ================================================
--- 1. Users Table (Managed by Supabase Auth)
--- ================================================
--- Supabase Auth automatically manages the auth.users table
--- We'll create a public.profiles table for additional user data
-
-CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
-  full_name TEXT,
-  avatar_url TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
-);
-
--- Enable Row Level Security
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-
--- Profiles RLS Policies
-CREATE POLICY "Users can view their own profile"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can update their own profile"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
-CREATE POLICY "Users can insert their own profile"
-  ON public.profiles FOR INSERT
-  WITH CHECK (auth.uid() = id);
-
--- ================================================
--- 2. Notes Table (Core Knowledge Data)
--- ================================================
-
-CREATE TABLE IF NOT EXISTS public.notes (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
-  
-  -- Source Information
+-- 2. notes 테이블 (사용자 노트)
+CREATE TABLE IF NOT EXISTS notes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
-  source_type TEXT NOT NULL CHECK (source_type IN ('youtube', 'pdf', 'ppt', 'docx', 'text')),
-  source_url TEXT,  -- YouTube URL or file path
-  
-  -- Supreme Instruction (사용자 맞춤 명령)
-  instruction TEXT,  -- User's custom instruction for AI processing
-  
-  -- Generated Content
-  content_md TEXT,  -- AI-generated Markdown summary
-  mermaid_code TEXT,  -- Mermaid.js diagram code
-  
-  -- Metadata
-  thumbnail_url TEXT,  -- YouTube thumbnail or document preview
-  duration INTEGER,  -- Video duration in seconds (for YouTube)
-  file_size INTEGER,  -- File size in bytes (for documents)
-  
-  -- Timestamps
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL,
-  
-  -- Search optimization
-  search_vector tsvector
+  content TEXT NOT NULL,
+  tags TEXT[] DEFAULT '{}',
+  is_favorite BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create index for full-text search
-CREATE INDEX notes_search_idx ON public.notes USING GIN (search_vector);
+-- 3. youtube_summaries 테이블 (YouTube 요약)
+CREATE TABLE IF NOT EXISTS youtube_summaries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  video_url TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  thumbnail_url TEXT,
+  duration INTEGER, -- 초 단위
+  summary TEXT NOT NULL,
+  key_points TEXT[],
+  transcript TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Create index for user queries
-CREATE INDEX notes_user_id_idx ON public.notes(user_id);
+-- 4. embeddings 테이블 (Vector 검색용)
+CREATE TABLE IF NOT EXISTS embeddings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  content_id UUID NOT NULL,
+  content_type TEXT NOT NULL, -- 'note' or 'youtube'
+  content TEXT NOT NULL,
+  embedding vector(768), -- Gemini embedding dimension
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Create index for created_at (for sorting)
-CREATE INDEX notes_created_at_idx ON public.notes(created_at DESC);
+-- 5. user_documents 테이블 (업로드된 문서)
+CREATE TABLE IF NOT EXISTS user_documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  file_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  file_type TEXT NOT NULL,
+  file_size INTEGER NOT NULL,
+  summary TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Enable Row Level Security
-ALTER TABLE public.notes ENABLE ROW LEVEL SECURITY;
+-- 6. user_preferences 테이블 (사용자 설정)
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  theme TEXT DEFAULT 'dark',
+  language TEXT DEFAULT 'ko',
+  ai_model TEXT DEFAULT 'gemini',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
 
--- Notes RLS Policies
-CREATE POLICY "Users can view their own notes"
-  ON public.notes FOR SELECT
+-- 인덱스 생성 (검색 성능 향상)
+CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_youtube_user_id ON youtube_summaries(user_id);
+CREATE INDEX IF NOT EXISTS idx_youtube_created_at ON youtube_summaries(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_embeddings_user_id ON embeddings(user_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_content_type ON embeddings(content_type);
+
+-- Vector 유사도 검색을 위한 인덱스 (HNSW 알고리즘)
+CREATE INDEX IF NOT EXISTS idx_embeddings_vector ON embeddings 
+USING hnsw (embedding vector_cosine_ops);
+
+-- RLS (Row Level Security) 활성화
+ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE youtube_summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE embeddings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
+
+-- RLS 정책: 사용자는 자신의 데이터만 접근 가능
+-- notes 정책
+CREATE POLICY "Users can view their own notes" 
+  ON notes FOR SELECT 
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can insert their own notes"
-  ON public.notes FOR INSERT
+CREATE POLICY "Users can insert their own notes" 
+  ON notes FOR INSERT 
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Users can update their own notes"
-  ON public.notes FOR UPDATE
+CREATE POLICY "Users can update their own notes" 
+  ON notes FOR UPDATE 
   USING (auth.uid() = user_id);
 
-CREATE POLICY "Users can delete their own notes"
-  ON public.notes FOR DELETE
+CREATE POLICY "Users can delete their own notes" 
+  ON notes FOR DELETE 
   USING (auth.uid() = user_id);
 
--- ================================================
--- 3. Embeddings Table (For Future RAG)
--- ================================================
+-- youtube_summaries 정책
+CREATE POLICY "Users can view their own youtube summaries" 
+  ON youtube_summaries FOR SELECT 
+  USING (auth.uid() = user_id);
 
-CREATE TABLE IF NOT EXISTS public.embeddings (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  note_id UUID REFERENCES public.notes(id) ON DELETE CASCADE NOT NULL,
-  
-  -- Chunk Information
-  chunk_text TEXT NOT NULL,
-  chunk_index INTEGER NOT NULL,
-  
-  -- Vector Embedding
-  embedding vector(1536),  -- OpenAI ada-002 dimension or Gemini embedding
-  
-  -- Metadata
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
-);
+CREATE POLICY "Users can insert their own youtube summaries" 
+  ON youtube_summaries FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
 
--- Create index for vector similarity search
-CREATE INDEX embeddings_vector_idx ON public.embeddings 
-  USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
+CREATE POLICY "Users can delete their own youtube summaries" 
+  ON youtube_summaries FOR DELETE 
+  USING (auth.uid() = user_id);
 
--- Create index for note queries
-CREATE INDEX embeddings_note_id_idx ON public.embeddings(note_id);
+-- embeddings 정책
+CREATE POLICY "Users can view their own embeddings" 
+  ON embeddings FOR SELECT 
+  USING (auth.uid() = user_id);
 
--- Enable Row Level Security
-ALTER TABLE public.embeddings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can insert their own embeddings" 
+  ON embeddings FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
 
--- Embeddings RLS Policies (inherit from notes)
-CREATE POLICY "Users can view embeddings of their own notes"
-  ON public.embeddings FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.notes
-      WHERE notes.id = embeddings.note_id
-      AND notes.user_id = auth.uid()
-    )
-  );
+CREATE POLICY "Users can delete their own embeddings" 
+  ON embeddings FOR DELETE 
+  USING (auth.uid() = user_id);
 
--- ================================================
--- 4. Functions & Triggers
--- ================================================
+-- user_documents 정책
+CREATE POLICY "Users can view their own documents" 
+  ON user_documents FOR SELECT 
+  USING (auth.uid() = user_id);
 
--- Function to update updated_at timestamp
+CREATE POLICY "Users can insert their own documents" 
+  ON user_documents FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own documents" 
+  ON user_documents FOR DELETE 
+  USING (auth.uid() = user_id);
+
+-- user_preferences 정책
+CREATE POLICY "Users can view their own preferences" 
+  ON user_preferences FOR SELECT 
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own preferences" 
+  ON user_preferences FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own preferences" 
+  ON user_preferences FOR UPDATE 
+  USING (auth.uid() = user_id);
+
+-- updated_at 자동 업데이트 트리거 함수
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-  NEW.updated_at = TIMEZONE('utc'::text, NOW());
+  NEW.updated_at = NOW();
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger for profiles table
-CREATE TRIGGER update_profiles_updated_at
-  BEFORE UPDATE ON public.profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
-
--- Trigger for notes table
+-- notes 테이블에 트리거 적용
 CREATE TRIGGER update_notes_updated_at
-  BEFORE UPDATE ON public.notes
+  BEFORE UPDATE ON notes
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
--- Function to update search vector
-CREATE OR REPLACE FUNCTION update_notes_search_vector()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.search_vector :=
-    setweight(to_tsvector('english', COALESCE(NEW.title, '')), 'A') ||
-    setweight(to_tsvector('english', COALESCE(NEW.content_md, '')), 'B') ||
-    setweight(to_tsvector('english', COALESCE(NEW.instruction, '')), 'C');
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
--- Trigger to update search vector
-CREATE TRIGGER update_notes_search_vector_trigger
-  BEFORE INSERT OR UPDATE OF title, content_md, instruction
-  ON public.notes
+-- user_preferences 테이블에 트리거 적용
+CREATE TRIGGER update_user_preferences_updated_at
+  BEFORE UPDATE ON user_preferences
   FOR EACH ROW
-  EXECUTE FUNCTION update_notes_search_vector();
+  EXECUTE FUNCTION update_updated_at_column();
 
--- Function to create profile on user signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
+-- Vector 검색 함수 (노트 + YouTube 통합 검색)
+CREATE OR REPLACE FUNCTION search_similar_content(
+  query_embedding vector(768),
+  match_threshold float DEFAULT 0.7,
+  match_count int DEFAULT 10,
+  filter_user_id uuid DEFAULT NULL
+)
+RETURNS TABLE (
+  id uuid,
+  content text,
+  content_type text,
+  similarity float
+)
+LANGUAGE plpgsql
+AS $$
 BEGIN
-  INSERT INTO public.profiles (id, email, full_name, avatar_url)
-  VALUES (
-    NEW.id,
-    NEW.email,
-    NEW.raw_user_meta_data->>'full_name',
-    NEW.raw_user_meta_data->>'avatar_url'
-  );
-  RETURN NEW;
+  RETURN QUERY
+  SELECT
+    e.content_id,
+    e.content,
+    e.content_type,
+    1 - (e.embedding <=> query_embedding) as similarity
+  FROM embeddings e
+  WHERE 
+    (filter_user_id IS NULL OR e.user_id = filter_user_id)
+    AND 1 - (e.embedding <=> query_embedding) > match_threshold
+  ORDER BY e.embedding <=> query_embedding
+  LIMIT match_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Trigger to create profile on user signup
-CREATE TRIGGER on_auth_user_created
-  AFTER INSERT ON auth.users
-  FOR EACH ROW
-  EXECUTE FUNCTION public.handle_new_user();
-
--- ================================================
--- 5. Sample Data (Optional - for testing)
--- ================================================
-
--- Uncomment to insert sample data
-/*
-INSERT INTO public.notes (user_id, title, source_type, source_url, instruction, content_md, mermaid_code)
-VALUES (
-  auth.uid(),
-  'Sample Note',
-  'youtube',
-  'https://www.youtube.com/watch?v=example',
-  '이 영상의 핵심 개념을 5가지로 요약해주세요',
-  '# Sample Summary\n\n- Point 1\n- Point 2',
-  'graph TD\n  A[Start] --> B[End]'
-);
-*/
-
--- ================================================
--- End of Schema
--- ================================================
+$$;

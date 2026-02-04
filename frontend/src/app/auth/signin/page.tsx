@@ -1,8 +1,8 @@
 'use client'
 
-import { signIn } from 'next-auth/react'
 import { useState } from 'react'
 import { Chrome } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
 export default function SignIn() {
   const [isLoading, setIsLoading] = useState(false)
@@ -10,12 +10,19 @@ export default function SignIn() {
   const handleSignIn = async () => {
     setIsLoading(true)
     try {
-      await signIn('google', { 
-        callbackUrl: '/dashboard',
-        redirect: true 
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+        },
       })
+      if (error) {
+        console.error('로그인 실패:', error.message)
+        alert('로그인 실패: ' + error.message)
+        setIsLoading(false)
+      }
     } catch (error) {
-      console.error('로그인 실패:', error)
+      console.error('로그인 오류:', error)
       setIsLoading(false)
     }
   }
@@ -73,7 +80,7 @@ export default function SignIn() {
           {/* Info Message */}
           <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
             <p className="text-sm text-blue-300 text-center">
-              🔒 Google 계정으로 안전하게 로그인됩니다
+              🔒 Supabase Auth로 안전하게 로그인됩니다
             </p>
           </div>
 
@@ -91,6 +98,13 @@ export default function SignIn() {
               <div className="w-1.5 h-1.5 rounded-full bg-green-400"></div>
               <span>모든 기기에서 자동 동기화</span>
             </div>
+          </div>
+
+          {/* Setup Notice */}
+          <div className="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+            <p className="text-xs text-yellow-300 text-center">
+              ⚠️ Supabase 프로젝트 설정이 필요합니다
+            </p>
           </div>
         </div>
 
