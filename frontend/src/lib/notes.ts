@@ -57,6 +57,7 @@ export async function createNote(input: CreateNoteInput): Promise<Note | null> {
       content: input.content,
       tags: input.tags || [],
       is_favorite: input.is_favorite || false,
+      folder_id: input.folder_id || null,
     })
     .select()
     .single()

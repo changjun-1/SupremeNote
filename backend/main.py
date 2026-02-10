@@ -45,12 +45,13 @@ async def health_check():
     return {"status": "ok"}
 
 # 라우터 추가
-from routers import youtube
+from routers import youtube, pdf, web
 app.include_router(youtube.router, prefix="/api/youtube", tags=["YouTube"])
+app.include_router(pdf.router, prefix="/api/pdf", tags=["PDF"])
+app.include_router(web.router, prefix="/api/web", tags=["Web"])
 
 # TODO: 추가 라우터들
 # from routers import documents, ai
-# app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 # app.include_router(documents.router, prefix="/api/documents", tags=["Documents"])
 # app.include_router(ai.router, prefix="/api/ai", tags=["AI Processing"])
 

@@ -1,8 +1,21 @@
 // Database types for SupremeNote
 
+export interface Folder {
+  id: string
+  user_id: string
+  name: string
+  color: string
+  icon: string
+  parent_id: string | null
+  position: number
+  created_at: string
+  updated_at: string
+}
+
 export interface Note {
   id: string
   user_id: string
+  folder_id: string | null
   title: string
   content: string
   tags: string[]
@@ -44,6 +57,9 @@ export interface UserPreferences {
   created_at: string
   updated_at: string
 }
+
+export type CreateFolderInput = Omit<Folder, 'id' | 'user_id' | 'created_at' | 'updated_at'>
+export type UpdateFolderInput = Partial<CreateFolderInput>
 
 export type CreateNoteInput = Omit<Note, 'id' | 'user_id' | 'created_at' | 'updated_at'>
 export type UpdateNoteInput = Partial<CreateNoteInput>

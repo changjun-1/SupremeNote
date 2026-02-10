@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Download, Edit, Save, BookOpen, Network, Share2, Star, MoreVertical, Sparkles, LogOut, User, Settings, Youtube, ExternalLink, Play } from 'lucide-react'
+import { Download, Edit, Save, BookOpen, Network, Share2, Star, MoreVertical, Sparkles, LogOut, User, Settings, Youtube, ExternalLink, Play, Folder } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-import type { Note } from '@/types/database'
+import type { Note, Folder as FolderType } from '@/types/database'
 import { toggleFavorite } from '@/lib/notes'
+import { getFolders } from '@/lib/folders'
 
 interface ViewerProps {
   session: any
@@ -22,10 +23,21 @@ export default function Viewer({ session, note, onEdit, onSaveAsNote }: ViewerPr
   const [isFavorite, setIsFavorite] = useState(note?.is_favorite || false)
   const [showUserMenu, setShowUserMenu] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [folders, setFolders] = useState<FolderType[]>([])
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   
   useEffect(() => {
     setIsFavorite(note?.is_favorite || false)
   }, [note])
+
+  useEffect(() => {
+    loadFolders()
+  }, [])
+
+  const loadFolders = async () => {
+    const fetchedFolders = await getFolders()
+    setFolders(fetchedFolders)
+  }
   
   const handleSignOut = async () => {
     await supabase.auth.signOut()
@@ -52,8 +64,14 @@ export default function Viewer({ session, note, onEdit, onSaveAsNote }: ViewerPr
     
     setIsSaving(true)
     try {
-      await onSaveAsNote(note)
+      // 선택된 폴더 ID를 포함하여 저장
+      const noteToSave = {
+        ...note,
+        folder_id: selectedFolderId
+      }
+      await onSaveAsNote(noteToSave)
       alert('✅ 노트로 저장되었습니다!')
+      setSelectedFolderId(null) // 저장 후 초기화
     } catch (error) {
       console.error('노트 저장 실패:', error)
       alert('❌ 노트 저장에 실패했습니다.')
@@ -75,6 +93,10 @@ export default function Viewer({ session, note, onEdit, onSaveAsNote }: ViewerPr
   }
 
   const isYoutubeSummary = note?.tags?.includes('youtube') || note?.content?.includes('📺 YouTube 요약');
+  const isPdfSummary = note?.tags?.includes('pdf') || note?.content?.includes('📄 PDF 문서 요약');
+  const isWebSummary = note?.tags?.includes('web') || note?.content?.includes('🌐 웹 페이지 요약');
+  const isSummaryNote = isYoutubeSummary || isPdfSummary || isWebSummary;
+  
   const youtubeUrl = note ? extractYoutubeUrl(note.content) : null;
   const videoId = youtubeUrl ? getYoutubeVideoId(youtubeUrl) : null;
 
@@ -212,27 +234,27 @@ export default function Viewer({ session, note, onEdit, onSaveAsNote }: ViewerPr
 
   if (!note) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="flex-1 flex items-center justify-center bg-white">
         <div className="text-center max-w-md">
-          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-600/20 flex items-center justify-center mx-auto mb-6">
-            <BookOpen className="w-10 h-10 text-blue-400" />
+          <div className="w-16 h-16 rounded bg-[#f7f6f3] border border-[#e9e9e7] flex items-center justify-center mx-auto mb-4">
+            <BookOpen className="w-8 h-8 text-[#9b9a97]" />
           </div>
-          <h3 className="text-2xl font-bold text-white mb-3">노트를 선택하세요</h3>
-          <p className="text-slate-400 mb-6">
+          <h3 className="text-xl font-semibold text-[#37352f] mb-2">노트를 선택하세요</h3>
+          <p className="text-[#9b9a97] text-sm mb-6">
             왼쪽에서 기존 노트를 선택하거나<br />
             새 노트를 생성하여 시작하세요
           </p>
-          <div className="flex gap-3 justify-center text-xs text-slate-500">
+          <div className="flex gap-3 justify-center text-xs text-[#9b9a97]">
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-[#2383e2]"></div>
               YouTube
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-purple-500"></div>
               PDF/문서
             </div>
             <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
               AI 요약
             </div>
           </div>
@@ -242,82 +264,100 @@ export default function Viewer({ session, note, onEdit, onSaveAsNote }: ViewerPr
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
+    <div className="flex-1 flex flex-col bg-white overflow-hidden">
       {/* Header */}
-      <div className="glass-morphism border-b border-slate-700/50">
-        <div className="px-6 py-4 flex items-center justify-between">
+      <div className="bg-white border-b border-[#e9e9e7]">
+        <div className="px-6 py-3 flex items-center justify-between">
           {/* Left: Tabs */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setActiveTab('markdown')}
-              className={`px-4 py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
                 activeTab === 'markdown'
-                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-lg shadow-blue-500/30'
-                  : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50 hover:text-slate-300'
+                  ? 'bg-[#e9e9e7] text-[#37352f]'
+                  : 'text-[#787774] hover:bg-[#f1f1ef]'
               }`}
             >
-              <BookOpen className="w-4 h-4 inline mr-2" />
+              <BookOpen className="w-3.5 h-3.5 inline mr-1" />
               노트
             </button>
             {isYoutubeSummary && videoId && (
               <button
                 onClick={() => setActiveTab('video')}
-                className={`px-4 py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
                   activeTab === 'video'
-                    ? 'bg-gradient-to-r from-red-600 to-red-500 text-white shadow-lg shadow-red-500/30'
-                    : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50 hover:text-slate-300'
+                    ? 'bg-[#e9e9e7] text-[#37352f]'
+                    : 'text-[#787774] hover:bg-[#f1f1ef]'
                 }`}
               >
-                <Youtube className="w-4 h-4 inline mr-2" />
-                영상 보기
+                <Youtube className="w-3.5 h-3.5 inline mr-1" />
+                영상
               </button>
             )}
             <button
               onClick={() => setActiveTab('mindmap')}
-              className={`px-4 py-2.5 rounded-xl font-semibold transition-all duration-200 ${
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-all ${
                 activeTab === 'mindmap'
-                  ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white shadow-lg shadow-purple-500/30'
-                  : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50 hover:text-slate-300'
+                  ? 'bg-[#e9e9e7] text-[#37352f]'
+                  : 'text-[#787774] hover:bg-[#f1f1ef]'
               }`}
             >
-              <Network className="w-4 h-4 inline mr-2" />
+              <Network className="w-3.5 h-3.5 inline mr-1" />
               마인드맵
             </button>
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-2">
-            {isYoutubeSummary && onSaveAsNote && (
-              <button 
-                onClick={handleSaveAsNote}
-                disabled={isSaving}
-                className="px-4 py-2.5 bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white rounded-xl font-semibold transition-all shadow-lg shadow-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                <Save className="w-4 h-4" />
-                {isSaving ? '저장 중...' : '노트로 저장'}
-              </button>
+          <div className="flex items-center gap-1">
+            {isSummaryNote && onSaveAsNote && (
+              <>
+                <div className="relative">
+                  <select
+                    value={selectedFolderId || ''}
+                    onChange={(e) => setSelectedFolderId(e.target.value || null)}
+                    className="pl-6 pr-2 py-1.5 bg-white border border-[#e9e9e7] rounded text-[#37352f] text-xs focus:outline-none focus:ring-1 focus:ring-[#2383e2] focus:border-[#2383e2] transition-all appearance-none"
+                    title="저장할 폴더를 선택하세요"
+                  >
+                    <option value="">폴더 없음</option>
+                    {folders.map((folder) => (
+                      <option key={folder.id} value={folder.id}>
+                        {folder.icon} {folder.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Folder className="w-3 h-3 text-[#9b9a97] absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+                <button 
+                  onClick={handleSaveAsNote}
+                  disabled={isSaving}
+                  className="px-3 py-1.5 bg-[#2383e2] hover:bg-[#1a74d1] text-white rounded text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  {isSaving ? '저장 중...' : '저장'}
+                </button>
+              </>
             )}
             <button 
               onClick={handleToggleFavorite}
-              className={`p-2.5 rounded-xl transition-all ${
+              className={`p-1.5 rounded transition-all ${
                 isFavorite
-                  ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
-                  : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50'
+                  ? 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
+                  : 'text-[#9b9a97] hover:bg-[#f1f1ef]'
               }`}
             >
-              <Star className={`w-5 h-5 ${isFavorite ? 'fill-yellow-400' : ''}`} />
+              <Star className={`w-4 h-4 ${isFavorite ? 'fill-yellow-600' : ''}`} />
             </button>
-            <button className="p-2.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 rounded-xl transition-all">
-              <Share2 className="w-5 h-5" />
+            <button className="p-1.5 text-[#9b9a97] hover:bg-[#f1f1ef] rounded transition-all">
+              <Share2 className="w-4 h-4" />
             </button>
             <button 
               onClick={onEdit}
-              className="p-2.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-xl transition-all"
+              className="p-1.5 text-[#2383e2] hover:bg-blue-50 rounded transition-all"
             >
-              <Edit className="w-5 h-5" />
+              <Edit className="w-4 h-4" />
             </button>
-            <button className="p-2.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 rounded-xl transition-all">
-              <Download className="w-5 h-5" />
+            <button className="p-1.5 text-[#9b9a97] hover:bg-[#f1f1ef] rounded transition-all">
+              <Download className="w-4 h-4" />
             </button>
 
             {/* User Menu */}

@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Save, X, Tag, Star, Sparkles, Loader2 } from 'lucide-react'
+import { Save, X, Tag, Star, Sparkles, Loader2, Folder } from 'lucide-react'
 import { createNote, updateNote } from '@/lib/notes'
-import type { Note } from '@/types/database'
+import { getFolders } from '@/lib/folders'
+import type { Note, Folder as FolderType } from '@/types/database'
 
 interface NoteEditorProps {
   note?: Note | null
@@ -16,11 +17,23 @@ export default function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) 
   const [content, setContent] = useState(note?.content || '')
   const [tags, setTags] = useState<string[]>(note?.tags || [])
   const [isFavorite, setIsFavorite] = useState(note?.is_favorite || false)
+  const [folderId, setFolderId] = useState<string | null>(note?.folder_id || null)
+  const [folders, setFolders] = useState<FolderType[]>([])
   const [tagInput, setTagInput] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved')
   
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 폴더 목록 로드
+  useEffect(() => {
+    loadFolders()
+  }, [])
+
+  const loadFolders = async () => {
+    const fetchedFolders = await getFolders()
+    setFolders(fetchedFolders)
+  }
 
   // Auto-save function
   const autoSave = async () => {
@@ -36,6 +49,7 @@ export default function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) 
           content,
           tags,
           is_favorite: isFavorite,
+          folder_id: folderId,
         })
         if (updated) {
           onSave(updated)
@@ -47,6 +61,7 @@ export default function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) 
           content,
           tags,
           is_favorite: isFavorite,
+          folder_id: folderId,
         })
         if (newNote) {
           onSave(newNote)
@@ -117,28 +132,28 @@ export default function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) 
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
+    <div className="flex-1 flex flex-col bg-white overflow-hidden">
       {/* Header */}
-      <div className="glass-morphism border-b border-slate-700/50">
-        <div className="px-6 py-4 flex items-center justify-between">
+      <div className="bg-white border-b border-[#e9e9e7]">
+        <div className="px-6 py-3 flex items-center justify-between">
           {/* Left: Status */}
           <div className="flex items-center gap-3">
-            <div className="text-sm">
+            <div className="text-xs">
               {autoSaveStatus === 'saving' && (
-                <span className="flex items-center gap-2 text-blue-400">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  저장 중...
+                <span className="flex items-center gap-1.5 text-[#2383e2]">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  저장 중
                 </span>
               )}
               {autoSaveStatus === 'saved' && (
-                <span className="flex items-center gap-2 text-green-400">
-                  <div className="w-2 h-2 rounded-full bg-green-400"></div>
+                <span className="flex items-center gap-1.5 text-green-600">
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-600"></div>
                   저장됨
                 </span>
               )}
               {autoSaveStatus === 'unsaved' && (
-                <span className="flex items-center gap-2 text-slate-400">
-                  <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                <span className="flex items-center gap-1.5 text-[#9b9a97]">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#9b9a97]"></div>
                   저장 안됨
                 </span>
               )}
@@ -146,72 +161,92 @@ export default function NoteEditor({ note, onSave, onCancel }: NoteEditorProps) 
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setIsFavorite(!isFavorite)}
-              className={`p-2.5 rounded-xl transition-all ${
+              className={`p-1.5 rounded transition-all ${
                 isFavorite
-                  ? 'bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30'
-                  : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50'
+                  ? 'bg-yellow-50 text-yellow-600 hover:bg-yellow-100'
+                  : 'text-[#9b9a97] hover:bg-[#f1f1ef]'
               }`}
             >
-              <Star className={`w-5 h-5 ${isFavorite ? 'fill-yellow-400' : ''}`} />
+              <Star className={`w-4 h-4 ${isFavorite ? 'fill-yellow-600' : ''}`} />
             </button>
             <button
               onClick={handleManualSave}
               disabled={isSaving}
-              className="px-5 py-2.5 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white rounded-xl font-semibold flex items-center gap-2 transition-all shadow-lg shadow-green-500/25 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-3 py-1.5 bg-[#2383e2] hover:bg-[#1a74d1] text-white rounded text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  저장 중...
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  저장 중
                 </>
               ) : (
                 <>
-                  <Save className="w-4 h-4" />
+                  <Save className="w-3.5 h-3.5" />
                   저장
                 </>
               )}
             </button>
             <button
               onClick={onCancel}
-              className="p-2.5 bg-slate-700/30 hover:bg-slate-700/50 text-slate-300 rounded-xl transition-all"
+              className="p-1.5 text-[#9b9a97] hover:bg-[#f1f1ef] rounded transition-all"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
         </div>
       </div>
 
       {/* Editor Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-8 py-12">
+      <div className="flex-1 overflow-y-auto bg-white">
+        <div className="max-w-4xl mx-auto px-16 py-12">
           {/* Title */}
           <input
             type="text"
-            placeholder="제목을 입력하세요..."
+            placeholder="제목 없음"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full text-4xl font-bold text-white bg-transparent border-none outline-none placeholder-slate-600 mb-6"
+            className="w-full text-4xl font-bold text-[#37352f] bg-transparent border-none outline-none placeholder-[#d3d1cb] mb-4"
           />
 
-          {/* Tags */}
-          <div className="mb-8">
-            <div className="flex items-center gap-2 mb-3">
-              <Tag className="w-4 h-4 text-slate-400" />
-              <span className="text-sm font-medium text-slate-400">태그</span>
+          {/* Folder Selection */}
+          <div className="mb-4">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Folder className="w-3.5 h-3.5 text-[#9b9a97]" />
+              <span className="text-xs font-medium text-[#9b9a97]">폴더</span>
             </div>
-            <div className="flex flex-wrap gap-2 mb-3">
+            <select
+              value={folderId || ''}
+              onChange={(e) => setFolderId(e.target.value || null)}
+              className="w-full px-3 py-2 bg-white border border-[#e9e9e7] rounded text-[#37352f] text-sm focus:outline-none focus:ring-1 focus:ring-[#2383e2] focus:border-[#2383e2] transition-all"
+            >
+              <option value="">폴더 없음</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {folder.icon} {folder.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tags */}
+          <div className="mb-6">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Tag className="w-3.5 h-3.5 text-[#9b9a97]" />
+              <span className="text-xs font-medium text-[#9b9a97]">태그</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5 mb-2">
               {tags.map((tag) => (
                 <span
                   key={tag}
-                  className="px-3 py-1.5 bg-blue-500/20 text-blue-300 rounded-lg text-sm flex items-center gap-2 border border-blue-500/30"
+                  className="px-2 py-1 bg-[#f7f6f3] text-[#37352f] rounded text-xs flex items-center gap-1.5 border border-[#e9e9e7]"
                 >
                   #{tag}
                   <button
                     onClick={() => handleRemoveTag(tag)}
-                    className="hover:text-red-400 transition-colors"
+                    className="hover:text-red-600 transition-colors"
                   >
                     <X className="w-3 h-3" />
                   </button>

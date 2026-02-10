@@ -4,10 +4,24 @@
 -- 1. pgvector extension 활성화 (Vector 검색용)
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- 2. notes 테이블 (사용자 노트)
+-- 2. folders 테이블 (폴더/카테고리)
+CREATE TABLE IF NOT EXISTS folders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT DEFAULT '#3b82f6', -- 폴더 색상
+  icon TEXT DEFAULT '📁', -- 폴더 아이콘
+  parent_id UUID REFERENCES folders(id) ON DELETE CASCADE, -- 중첩 폴더
+  position INTEGER DEFAULT 0, -- 정렬 순서
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. notes 테이블 (사용자 노트)
 CREATE TABLE IF NOT EXISTS notes (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  folder_id UUID REFERENCES folders(id) ON DELETE SET NULL, -- 폴더 연결
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   tags TEXT[] DEFAULT '{}',
@@ -16,7 +30,7 @@ CREATE TABLE IF NOT EXISTS notes (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 3. youtube_summaries 테이블 (YouTube 요약)
+-- 4. youtube_summaries 테이블 (YouTube 요약)
 CREATE TABLE IF NOT EXISTS youtube_summaries (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -31,7 +45,7 @@ CREATE TABLE IF NOT EXISTS youtube_summaries (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 4. embeddings 테이블 (Vector 검색용)
+-- 5. embeddings 테이블 (Vector 검색용)
 CREATE TABLE IF NOT EXISTS embeddings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -42,7 +56,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 5. user_documents 테이블 (업로드된 문서)
+-- 6. user_documents 테이블 (업로드된 문서)
 CREATE TABLE IF NOT EXISTS user_documents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -54,7 +68,7 @@ CREATE TABLE IF NOT EXISTS user_documents (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 6. user_preferences 테이블 (사용자 설정)
+-- 7. user_preferences 테이블 (사용자 설정)
 CREATE TABLE IF NOT EXISTS user_preferences (
   user_id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   theme TEXT DEFAULT 'dark',
@@ -65,7 +79,11 @@ CREATE TABLE IF NOT EXISTS user_preferences (
 );
 
 -- 인덱스 생성 (검색 성능 향상)
+CREATE INDEX IF NOT EXISTS idx_folders_user_id ON folders(user_id);
+CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id);
+CREATE INDEX IF NOT EXISTS idx_folders_position ON folders(position);
 CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id);
+CREATE INDEX IF NOT EXISTS idx_notes_folder_id ON notes(folder_id);
 CREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_youtube_user_id ON youtube_summaries(user_id);
 CREATE INDEX IF NOT EXISTS idx_youtube_created_at ON youtube_summaries(created_at DESC);
@@ -77,6 +95,7 @@ CREATE INDEX IF NOT EXISTS idx_embeddings_vector ON embeddings
 USING hnsw (embedding vector_cosine_ops);
 
 -- RLS (Row Level Security) 활성화
+ALTER TABLE folders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE youtube_summaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE embeddings ENABLE ROW LEVEL SECURITY;
@@ -84,6 +103,23 @@ ALTER TABLE user_documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_preferences ENABLE ROW LEVEL SECURITY;
 
 -- RLS 정책: 사용자는 자신의 데이터만 접근 가능
+-- folders 정책
+CREATE POLICY "Users can view their own folders" 
+  ON folders FOR SELECT 
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own folders" 
+  ON folders FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own folders" 
+  ON folders FOR UPDATE 
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own folders" 
+  ON folders FOR DELETE 
+  USING (auth.uid() = user_id);
+
 -- notes 정책
 CREATE POLICY "Users can view their own notes" 
   ON notes FOR SELECT 
@@ -161,6 +197,12 @@ BEGIN
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+-- folders 테이블에 트리거 적용
+CREATE TRIGGER update_folders_updated_at
+  BEFORE UPDATE ON folders
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
 
 -- notes 테이블에 트리거 적용
 CREATE TRIGGER update_notes_updated_at

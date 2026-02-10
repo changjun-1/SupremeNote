@@ -1,12 +1,13 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, FileText, Youtube, FileUp, Plus, Clock, TrendingUp, BookOpen, LogOut, User } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Search, FileText, Youtube, FileUp, Plus, Clock, TrendingUp, BookOpen, LogOut, User, Folder, FolderPlus, ChevronRight, ChevronDown, Sparkles } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 
-import type { Note } from '@/types/database'
+import type { Note, Folder as FolderType } from '@/types/database'
 import { deleteNote } from '@/lib/notes'
+import { getFolders, createFolder, deleteFolder } from '@/lib/folders'
 import { Trash2, Loader2 } from 'lucide-react'
 
 interface SidebarProps {
@@ -25,7 +26,68 @@ export default function Sidebar({ session, notes, selectedNoteId, onSelectNote, 
   const [searchQuery, setSearchQuery] = useState('')
   const [activeFilter, setActiveFilter] = useState<'all' | 'recent' | 'favorites'>('all')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [folders, setFolders] = useState<FolderType[]>([])
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set())
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   
+  useEffect(() => {
+    loadFolders()
+  }, [])
+
+  const loadFolders = async () => {
+    const fetchedFolders = await getFolders()
+    setFolders(fetchedFolders)
+  }
+
+  const handleCreateFolder = async () => {
+    const folderName = prompt('폴더 이름을 입력하세요:')
+    if (!folderName || !folderName.trim()) return
+
+    setIsCreatingFolder(true)
+    try {
+      const newFolder = await createFolder({
+        name: folderName.trim(),
+        color: '#2383e2',
+        icon: '📁',
+        parent_id: null,
+        position: folders.length,
+      })
+
+      if (newFolder) {
+        setFolders([...folders, newFolder])
+      }
+    } catch (error) {
+      alert('폴더 생성 실패')
+    } finally {
+      setIsCreatingFolder(false)
+    }
+  }
+
+  const handleDeleteFolder = async (e: React.MouseEvent, folderId: string) => {
+    e.stopPropagation()
+    
+    if (!confirm('이 폴더를 삭제하시겠습니까? (폴더 내 노트는 삭제되지 않습니다)')) return
+
+    const success = await deleteFolder(folderId)
+    if (success) {
+      setFolders(folders.filter(f => f.id !== folderId))
+      if (selectedFolderId === folderId) {
+        setSelectedFolderId(null)
+      }
+    }
+  }
+
+  const toggleFolder = (folderId: string) => {
+    const newExpanded = new Set(expandedFolders)
+    if (newExpanded.has(folderId)) {
+      newExpanded.delete(folderId)
+    } else {
+      newExpanded.add(folderId)
+    }
+    setExpandedFolders(newExpanded)
+  }
+
   const handleSignOut = async () => {
     await supabase.auth.signOut()
     router.push('/auth/signin')
@@ -38,29 +100,33 @@ export default function Sidebar({ session, notes, selectedNoteId, onSelectNote, 
     
     setDeletingId(noteId)
     try {
-      const success = await deleteNote(noteId)
-      if (success) {
-        onDeleteNote(noteId)
-      }
+      await deleteNote(noteId)
+      onDeleteNote(noteId)
     } catch (error) {
-      alert('삭제 실패: ' + (error as Error).message)
+      alert('삭제 실패')
     } finally {
       setDeletingId(null)
     }
   }
 
-  // Filter notes
   const filteredNotes = notes.filter((note) => {
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase()
-      if (!note.title.toLowerCase().includes(query) && 
-          !note.content.toLowerCase().includes(query)) {
+    if (selectedFolderId !== null) {
+      if (note.folder_id !== selectedFolderId) {
         return false
       }
     }
 
-    // Active filter
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      const titleMatch = note.title.toLowerCase().includes(query)
+      const contentMatch = note.content.toLowerCase().includes(query)
+      const tagMatch = note.tags?.some(tag => tag.toLowerCase().includes(query))
+      
+      if (!titleMatch && !contentMatch && !tagMatch) {
+        return false
+      }
+    }
+
     if (activeFilter === 'favorites' && !note.is_favorite) {
       return false
     }
@@ -68,53 +134,50 @@ export default function Sidebar({ session, notes, selectedNoteId, onSelectNote, 
     return true
   })
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString)
-    const now = new Date()
-    const diff = now.getTime() - date.getTime()
-    
-    const seconds = Math.floor(diff / 1000)
-    const minutes = Math.floor(seconds / 60)
-    const hours = Math.floor(minutes / 60)
-    const days = Math.floor(hours / 24)
-
-    if (days > 7) {
-      return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
-    } else if (days > 0) {
-      return `${days}일 전`
-    } else if (hours > 0) {
-      return `${hours}시간 전`
-    } else if (minutes > 0) {
-      return `${minutes}분 전`
-    } else {
-      return '방금 전'
+  const sortedNotes = [...filteredNotes].sort((a, b) => {
+    if (activeFilter === 'recent') {
+      return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
     }
-  }
+    return 0
+  })
+
+  // 최근 기록: 중복 제거 + 최대 3개
+  const displayNotes = activeFilter === 'recent' 
+    ? (() => {
+        const seen = new Set<string>()
+        const uniqueNotes = []
+        
+        for (const note of sortedNotes) {
+          // 제목으로 중복 체크
+          const key = note.title.toLowerCase().trim()
+          if (!seen.has(key) && uniqueNotes.length < 3) {
+            seen.add(key)
+            uniqueNotes.push(note)
+          }
+        }
+        
+        return uniqueNotes
+      })()
+    : sortedNotes
 
   return (
-    <div className="w-80 bg-slate-800/50 backdrop-blur-xl border-r border-slate-700/50 flex flex-col">
+    <div className="w-80 bg-[#f7f6f3] border-r border-[#e9e9e7] flex flex-col h-screen">
       {/* Header */}
-      <div className="p-6 border-b border-slate-700/50">
+      <div className="p-4 border-b border-[#e9e9e7]">
         <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-xl font-bold">
-              🎯
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-white border border-[#e9e9e7] rounded flex items-center justify-center">
+              <FileText className="w-4 h-4 text-[#37352f]" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-white">SupremeNote</h1>
-              <p className="text-xs text-slate-400">AI Study Companion</p>
-            </div>
+            <span className="font-semibold text-[#37352f]">SupremeNote</span>
           </div>
-          
-          {/* YouTube 바로가기 */}
           <a
             href="https://youtube.com"
             target="_blank"
             rel="noopener noreferrer"
-            className="group flex items-center justify-center w-9 h-9 rounded-lg bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 hover:border-red-500/50 transition-all duration-200"
-            title="YouTube 바로가기"
+            className="p-1.5 hover:bg-[#e9e9e7] rounded transition-colors"
           >
-            <Youtube className="w-5 h-5 text-red-400 group-hover:text-red-300 transition-colors" />
+            <Youtube className="w-4 h-4 text-red-500" />
           </a>
         </div>
 
@@ -122,188 +185,185 @@ export default function Sidebar({ session, notes, selectedNoteId, onSelectNote, 
         <div className="space-y-2">
           <button 
             onClick={onNewNote}
-            className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40"
+            className="w-full py-2 px-3 bg-white hover:bg-[#e9e9e7] text-[#37352f] border border-[#e9e9e7] rounded font-medium flex items-center justify-center gap-2 transition-all text-sm"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-4 h-4" />
             새 노트 작성
           </button>
           <button 
             onClick={onNewYoutubeSummary}
-            className="w-full py-3 bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-500 hover:to-pink-500 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-red-500/25 hover:shadow-red-500/40"
+            className="w-full py-2 px-3 bg-[#2383e2] hover:bg-[#1a74d1] text-white rounded font-medium flex items-center justify-center gap-2 transition-all text-sm"
           >
-            <Youtube className="w-5 h-5" />
-            YouTube 요약
+            <Sparkles className="w-4 h-4" />
+            AI 콘텐츠 요약
           </button>
         </div>
       </div>
 
-      {/* Search & Filters */}
-      <div className="p-4 space-y-3 border-b border-slate-700/50">
-        {/* Search */}
+      {/* Search */}
+      <div className="p-3 border-b border-[#e9e9e7]">
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 w-4 h-4 text-[#9b9a97]" />
           <input
             type="text"
-            placeholder="노트 검색..."
+            placeholder="검색..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-slate-900/50 border border-slate-700/50 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"
+            className="w-full pl-8 pr-3 py-1.5 bg-white border border-[#e9e9e7] rounded text-[#37352f] text-sm placeholder-[#9b9a97] focus:outline-none focus:ring-1 focus:ring-[#2383e2] focus:border-[#2383e2] transition-all"
           />
+          {searchQuery && (
+            <div className="absolute right-2 top-1/2 transform -translate-y-1/2">
+              <span className="text-xs bg-[#2383e2] text-white px-1.5 py-0.5 rounded">
+                {filteredNotes.length}
+              </span>
+            </div>
+          )}
         </div>
+      </div>
 
-        {/* Filters */}
-        <div className="flex gap-2">
+      {/* Filters */}
+      <div className="px-3 py-2 border-b border-[#e9e9e7]">
+        <div className="flex gap-1">
           <button
-            onClick={() => setActiveFilter('all')}
-            className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeFilter === 'all'
-                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50'
+            onClick={() => { setActiveFilter('all'); setSelectedFolderId(null) }}
+            className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+              activeFilter === 'all' && !selectedFolderId
+                ? 'bg-[#e9e9e7] text-[#37352f]'
+                : 'text-[#787774] hover:bg-[#f1f1ef]'
             }`}
           >
-            <BookOpen className="w-3 h-3 inline mr-1" />
             전체
           </button>
           <button
-            onClick={() => setActiveFilter('recent')}
-            className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-              activeFilter === 'recent'
-                ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                : 'bg-slate-700/30 text-slate-400 hover:bg-slate-700/50'
+            onClick={() => { setActiveFilter('recent'); setSelectedFolderId(null) }}
+            className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+              activeFilter === 'recent' && !selectedFolderId
+                ? 'bg-[#e9e9e7] text-[#37352f]'
+                : 'text-[#787774] hover:bg-[#f1f1ef]'
             }`}
           >
-            <Clock className="w-3 h-3 inline mr-1" />
             최근
           </button>
+          <button
+            onClick={() => { setActiveFilter('favorites'); setSelectedFolderId(null) }}
+            className={`flex-1 px-2 py-1 rounded text-xs font-medium transition-all ${
+              activeFilter === 'favorites' && !selectedFolderId
+                ? 'bg-[#e9e9e7] text-[#37352f]'
+                : 'text-[#787774] hover:bg-[#f1f1ef]'
+            }`}
+          >
+            즐겨찾기
+          </button>
+        </div>
+      </div>
+
+      {/* Folders */}
+      <div className="px-3 py-2 border-b border-[#e9e9e7]">
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-xs font-semibold text-[#9b9a97] uppercase tracking-wide">폴더</h3>
+          <button onClick={handleCreateFolder} disabled={isCreatingFolder} className="p-0.5 hover:bg-[#e9e9e7] rounded transition-all disabled:opacity-50">
+            <FolderPlus className="w-3.5 h-3.5 text-[#787774]" />
+          </button>
+        </div>
+        <div className="space-y-0.5 max-h-32 overflow-y-auto">
+          {folders.map((folder) => (
+            <div key={folder.id} className="relative group">
+              <button
+                onClick={() => {
+                  setSelectedFolderId(folder.id === selectedFolderId ? null : folder.id)
+                  setActiveFilter('all')
+                }}
+                className={`w-full flex items-center gap-2 px-2 py-1 rounded text-sm transition-all ${
+                  selectedFolderId === folder.id
+                    ? 'bg-[#e9e9e7] text-[#37352f]'
+                    : 'text-[#787774] hover:bg-[#f1f1ef]'
+                }`}
+              >
+                <span className="text-sm">{folder.icon}</span>
+                <span className="flex-1 text-left truncate text-xs">{folder.name}</span>
+                <span className="text-xs text-[#9b9a97]">
+                  {notes.filter(n => n.folder_id === folder.id).length}
+                </span>
+              </button>
+              <button
+                onClick={(e) => handleDeleteFolder(e, folder.id)}
+                className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 p-0.5 hover:bg-[#e9e9e7] rounded transition-all"
+              >
+                <Trash2 className="w-3 h-3 text-[#eb5757]" />
+              </button>
+            </div>
+          ))}
+          {folders.length === 0 && (
+            <p className="text-xs text-[#9b9a97] text-center py-2">폴더를 만들어보세요</p>
+          )}
         </div>
       </div>
 
       {/* Notes List */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-2">
+      <div className="flex-1 overflow-y-auto px-2 py-2">
         {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 text-blue-400 animate-spin" />
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="w-5 h-5 text-[#9b9a97] animate-spin" />
           </div>
-        ) : filteredNotes.length === 0 ? (
-          <div className="text-center py-12 px-4">
-            <FileText className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-            <p className="text-slate-400 text-sm">
-              {searchQuery ? '검색 결과가 없습니다' : '노트가 없습니다'}
-            </p>
-            <p className="text-slate-500 text-xs mt-1">
-              {!searchQuery && '새 노트를 만들어보세요!'}
-            </p>
+        ) : displayNotes.length === 0 ? (
+          <div className="text-center py-8 px-4">
+            <p className="text-sm text-[#9b9a97] mb-2">노트가 없습니다</p>
+            <p className="text-xs text-[#9b9a97]">새 노트를 작성해보세요</p>
           </div>
         ) : (
-          filteredNotes.map((note) => (
-            <div
-              key={note.id}
-              onClick={() => onSelectNote(note.id)}
-              className={`group p-4 rounded-xl cursor-pointer transition-all duration-200 card-hover relative ${
-                selectedNoteId === note.id
-                  ? 'bg-blue-500/15 border border-blue-500/30 shadow-lg shadow-blue-500/10'
-                  : 'bg-slate-700/20 border border-slate-700/30 hover:bg-slate-700/40 hover:border-slate-600/50'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                {/* Icon */}
-                <div className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl bg-gradient-to-br from-blue-500/20 to-purple-600/20">
-                  📝
+          displayNotes.map((note) => (
+            <div key={note.id} className="relative group mb-1">
+              <button
+                onClick={() => onSelectNote(note.id)}
+                className={`w-full text-left p-2 rounded transition-all ${
+                  selectedNoteId === note.id
+                    ? 'bg-[#e9e9e7]'
+                    : 'hover:bg-[#f1f1ef]'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-1">
+                  <h3 className="font-medium text-sm text-[#37352f] truncate flex-1">
+                    {note.title || '제목 없음'}
+                  </h3>
+                  {note.is_favorite && (
+                    <span className="text-yellow-500 text-xs">★</span>
+                  )}
                 </div>
-                
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <h3 className="text-white font-semibold text-sm truncate group-hover:text-blue-300 transition-colors flex-1">
-                      {note.title || '제목 없음'}
-                    </h3>
-                    {note.is_favorite && (
-                      <Star className="w-4 h-4 text-yellow-400 fill-yellow-400 flex-shrink-0" />
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 mb-2 line-clamp-2">
-                    {note.content || '내용 없음'}
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500">{formatDate(note.updated_at)}</span>
-                    {note.tags.length > 0 && (
-                      <>
-                        <span className="text-slate-600">•</span>
-                        <span className="text-xs text-blue-400">#{note.tags[0]}</span>
-                        {note.tags.length > 1 && (
-                          <span className="text-xs text-slate-500">+{note.tags.length - 1}</span>
-                        )}
-                      </>
-                    )}
-                    {selectedNoteId === note.id && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse ml-auto"></span>
-                    )}
-                  </div>
+                <p className="text-xs text-[#9b9a97] line-clamp-2 mb-1">
+                  {note.content.replace(/[#*\->`]/g, '').substring(0, 60)}...
+                </p>
+                <div className="flex items-center gap-1">
+                  {note.tags && note.tags.slice(0, 2).map((tag) => (
+                    <span key={tag} className="text-xs px-1.5 py-0.5 bg-[#f1f1ef] text-[#787774] rounded">
+                      {tag}
+                    </span>
+                  ))}
                 </div>
-              </div>
-
-              {/* Delete Button */}
+              </button>
               <button
                 onClick={(e) => handleDelete(e, note.id)}
                 disabled={deletingId === note.id}
-                className="absolute top-2 right-2 p-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded-lg opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 p-1 hover:bg-[#e9e9e7] rounded transition-all disabled:opacity-50"
               >
-                {deletingId === note.id ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Trash2 className="w-4 h-4" />
-                )}
+                <Trash2 className="w-3 h-3 text-[#eb5757]" />
               </button>
             </div>
           ))
         )}
       </div>
 
-      {/* User Profile & Stats */}
-      <div className="border-t border-slate-700/50 bg-slate-800/30">
-        <div className="p-4">
-          <div className="flex items-center justify-between text-xs mb-3">
-            <div className="flex items-center gap-1.5 text-slate-400">
-              <TrendingUp className="w-3.5 h-3.5 text-green-400" />
-              <span>총 {notes.length}개 노트</span>
-            </div>
-            <div className="text-slate-500">
-              {notes.filter(n => {
-                const today = new Date()
-                const noteDate = new Date(n.created_at)
-                return noteDate.toDateString() === today.toDateString()
-              }).length}개 생성
-            </div>
-          </div>
-          
-          {/* User Info */}
-          {session?.user && (
-            <div className="space-y-2">
-              <div className="glass-morphism rounded-xl p-3 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white font-bold">
-                  {session.user.user_metadata?.name?.[0] || session.user.email?.[0] || 'U'}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">
-                    {session.user.user_metadata?.name || session.user.user_metadata?.full_name || '사용자'}
-                  </p>
-                  <p className="text-xs text-slate-400 truncate">
-                    {session.user.email}
-                  </p>
-                </div>
-              </div>
-              
-              {/* Logout Button */}
-              <button
-                onClick={handleSignOut}
-                className="w-full py-2.5 px-4 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 hover:border-red-500/30 text-red-400 rounded-xl font-medium flex items-center justify-center gap-2 transition-all duration-200"
-              >
-                <LogOut className="w-4 h-4" />
-                로그아웃
-              </button>
-            </div>
-          )}
-        </div>
+      {/* User Profile */}
+      <div className="p-3 border-t border-[#e9e9e7]">
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-2 px-2 py-1.5 hover:bg-[#e9e9e7] rounded transition-all text-sm text-[#37352f]"
+        >
+          <User className="w-4 h-4" />
+          <span className="flex-1 text-left truncate text-xs">
+            {session?.user?.email || '사용자'}
+          </span>
+          <LogOut className="w-3.5 h-3.5 text-[#9b9a97]" />
+        </button>
       </div>
     </div>
   )

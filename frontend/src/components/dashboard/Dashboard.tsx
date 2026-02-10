@@ -8,6 +8,8 @@ import InputArea from './InputArea'
 import { getNote, getNotes } from '@/lib/notes'
 import type { Note } from '@/types/database'
 import type { YoutubeSummaryResponse } from '@/lib/youtube'
+import type { PdfSummaryResponse } from '@/lib/pdf'
+import type { WebSummaryResponse } from '@/lib/web'
 
 export default function Dashboard({ session }: { session: any }) {
   const [notes, setNotes] = useState<Note[]>([])
@@ -88,6 +90,7 @@ ${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n'
     const tempNote: Note = {
       id: summary.id,
       user_id: session.user.id,
+      folder_id: null,
       title: summary.title,
       content: noteContent,
       tags: ['youtube', '요약'],
@@ -102,6 +105,116 @@ ${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n'
     
     // 목록 새로고침
     loadNotes()
+  }
+
+  const handlePdfSummaryGenerated = (summary: PdfSummaryResponse) => {
+    // PDF 요약을 노트로 변환
+    const noteContent = `# ${summary.title}
+
+## 📄 PDF 문서 요약
+
+**파일명:** ${summary.filename}  
+**저자:** ${summary.author || '정보 없음'}  
+**페이지 수:** ${summary.page_count}페이지  
+**단어 수:** 약 ${summary.word_count.toLocaleString()}단어
+
+---
+
+## 📝 요약
+
+${summary.summary}
+
+---
+
+## 💡 핵심 포인트
+
+${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n')}
+
+---
+
+*생성 일시: ${new Date(summary.created_at).toLocaleString('ko-KR')}*
+`
+
+    // 노트로 저장하지 않고 바로 표시
+    const tempNote: Note = {
+      id: summary.id,
+      user_id: session.user.id,
+      folder_id: null,
+      title: summary.title,
+      content: noteContent,
+      tags: ['pdf', '문서', '요약'],
+      is_favorite: false,
+      created_at: summary.created_at,
+      updated_at: summary.created_at,
+    }
+
+    setCurrentNote(tempNote)
+    setSelectedNoteId(summary.id)
+    setShowYoutubeInput(false)
+    
+    // 목록 새로고침
+    loadNotes()
+  }
+
+  const handleWebSummaryGenerated = (summary: WebSummaryResponse) => {
+    // 웹 URL 요약을 노트로 변환
+    const noteContent = `# ${summary.title}
+
+## 🌐 웹 페이지 요약
+
+**URL:** [웹사이트 방문 🔗](${summary.url})  
+**저자:** ${summary.author || '정보 없음'}  
+**단어 수:** 약 ${summary.word_count.toLocaleString()}단어
+
+${summary.description ? `\n**설명:** ${summary.description}\n` : ''}
+
+---
+
+## 📝 요약
+
+${summary.summary}
+
+---
+
+## 💡 핵심 포인트
+
+${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n')}
+
+---
+
+*생성 일시: ${new Date(summary.created_at).toLocaleString('ko-KR')}*
+`
+
+    // 노트로 저장하지 않고 바로 표시
+    const tempNote: Note = {
+      id: summary.id,
+      user_id: session.user.id,
+      folder_id: null,
+      title: summary.title,
+      content: noteContent,
+      tags: ['web', '웹', '요약'],
+      is_favorite: false,
+      created_at: summary.created_at,
+      updated_at: summary.created_at,
+    }
+
+    setCurrentNote(tempNote)
+    setSelectedNoteId(summary.id)
+    setShowYoutubeInput(false)
+    
+    // 목록 새로고침
+    loadNotes()
+  }
+
+  const handleSummaryGenerated = (data: any) => {
+    // YouTube, PDF, 웹 URL 요약 결과 처리
+    if ('video_url' in data) {
+      handleYoutubeSummaryGenerated(data as YoutubeSummaryResponse)
+    } else if ('filename' in data) {
+      handlePdfSummaryGenerated(data as PdfSummaryResponse)
+    } else if ('url' in data && 'word_count' in data) {
+      handleWebSummaryGenerated(data as WebSummaryResponse)
+    }
   }
 
   const handleEditNote = () => {
@@ -144,15 +257,16 @@ ${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n'
   }
 
   const handleSaveAsNote = async (note: Note) => {
-    // YouTube 요약을 실제 노트로 저장
+    // YouTube/PDF 요약을 실제 노트로 저장
     const { createNote } = await import('@/lib/notes')
     
     try {
       const savedNote = await createNote({
         title: note.title,
         content: note.content,
-        tags: note.tags || ['youtube', '요약'],
+        tags: note.tags || ['요약'],
         is_favorite: false,
+        folder_id: note.folder_id || null,
       })
 
       if (savedNote) {
@@ -170,7 +284,7 @@ ${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n'
   }
 
   return (
-    <div className="flex h-screen bg-slate-900">
+    <div className="flex h-screen bg-white">
       {/* Sidebar */}
       <Sidebar 
         session={session}
@@ -187,7 +301,7 @@ ${summary.key_points.map((point, index) => `${index + 1}. ${point}`).join('\n\n'
       <div className="flex-1 flex flex-col overflow-hidden">
         {showYoutubeInput ? (
           <InputArea 
-            onGenerate={handleYoutubeSummaryGenerated}
+            onGenerate={handleSummaryGenerated}
             onCancel={() => setShowYoutubeInput(false)}
           />
         ) : isEditing ? (
